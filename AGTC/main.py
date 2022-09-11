@@ -5,6 +5,7 @@ import torch
 import os
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import ModelCheckpoint
 from torchmetrics import Accuracy
 from torch import nn
 from torchvision.datasets import MNIST
@@ -15,33 +16,26 @@ from dataset import DataPreprocUtils
 from model import LSTMNet
 import wandb
 from datetime import datetime
-from argparse import ArgumentParser
+import argparse
 import logging
-
-# from config import Config
-# ArgParser
-# train, test file
-# use pretrained embedding or not
-# wandb
-# call dataset
-# call model
-# call trainer fit
-# display output
-
-# 加上early stop
-# 重寫config輸入方式
-########################
-trainfile = './data/train.csv'
-testfile = './data/test.csv'
-########################
+from gensim.models import fasttext
+import numpy as np
+import pathlib
 
 def get_embeddings():
+    script_loc = pathlib.Path(__file__).parent.resolve()
+    outputdir = f'{script_loc}/../FastText-pretrained'
+    model_name = 'agnews_fastext.model'
+    if os.path.exists(outputdir):
+        logging.info('Pretrained embeddings exist. Skipped downloading.')
+        return os.path.join(outputdir, model_name)
     import gdown
-    # https://drive.google.com/file/d/1j8mcp6OltU2Fd7YhyPFcAPqhtXAXAqQD/view?usp=sharing
-    ID = '1j8mcp6OltU2Fd7YhyPFcAPqhtXAXAqQD'
-    url = f'https://drive.google.com/uc?id={ID}'
-    output = 'agnews_fastext.model'
-    gdown.download(url, output, quiet=True)
+    logging.info('Downloading pretrained embeddings (fastText)... ')
+    ID = '1mgWOZmA9d97EVkEl6NBHCBLzdxlxg0VZ'
+    url = f"https://drive.google.com/drive/folders/{ID}"
+    gdown.download_folder(url, quiet = True)
+    return os.path.join(outputdir, model_name)
+
 
 def main(args):
     SEED = args.seed
@@ -64,29 +58,53 @@ def main(args):
     trainloader, testloader = p.get_dataloader()
     # p._detok_random() # for debug purpose
     logging.info('Finished data prep.')
+
+    pretrained_embeddings = None
+    if args.use_pretrained:
+        embpath = get_embeddings()
+        emodel = fasttext.FastText.load(embpath)
+        mean, std = 0, 1
+        pretrained_embeddings = np.random.normal(loc = mean, scale = std,
+                                    size = (len(p.vocabs), args.embdim))
+        for idx, word in enumerate(p.vocabs.get_itos()):
+            embedding_vector = emodel.wv[word]
+            if embedding_vector is not None:
+                pretrained_embeddings[idx] = embedding_vector
+        pretrained_embeddings = torch.from_numpy(pretrained_embeddings)
+
     model = LSTMNet(
         seed = SEED,
         vocabs = p.vocabs,
         is_bidirectional = args.is_bidirectional,
         lstm_hdim = args.lstm_hdim,
         embdim = args.embdim,
+        pretrained_embeddings = pretrained_embeddings,
         num_layers = args.num_layers,
         hiddim = args.hiddim,
         numchoice = args.numchoice,
         lr = args.lr,
         dropout = args.dropout)
     logging.info('Finished initializing LSTM model.')
+
+    checkpoint_callback = ModelCheckpoint(
+        monitor="val_acc",
+        dirpath="./checkpoints",
+        filename="AG-{epoch:02d}-{val_acc:.2f}",
+        save_top_k=3,
+        mode="max")
+
     trainer = pl.Trainer(max_epochs = 10,
                      accelerator="gpu",
                      devices = 1, # number of devices used in training, not device_id
                      logger = wandb_logger,
-                     gradient_clip_val= args.clip_grad)
+                     gradient_clip_val= args.clip_grad,
+                     callbacks=[checkpoint_callback])
     trainer.fit(model, trainloader, testloader)
     logging.info('Finished training!')
 
 if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument("-pe", "--use_pretrained", type=bool)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--use_pretrained", action='store_true')
     parser.add_argument("--train_file", type=str, default = '../data/train.csv')
     parser.add_argument("--validation_file", type=str, default = '../data/test.csv')
     parser.add_argument("--test_file", type=str, default = '../data/test.csv' )
@@ -105,3 +123,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(args)
+    # Command line:
+    # python3 main.py --use_pretrained  # use pretrained embeddings
+    # python3 main.py                   # do NOT use pretrained embeddings
+
