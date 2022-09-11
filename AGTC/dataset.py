@@ -5,22 +5,26 @@ import torch
 from torchtext.data import get_tokenizer
 import nltk
 import re
+import pytorch_lightning as pl
 from torchtext.vocab import build_vocab_from_iterator
 from torch.utils.data import TensorDataset, DataLoader
-from config import Config
 from utils import *
 import logging
 
-class DataPreprocUtils:
 
+class DataPreprocUtils:
     def __init__(self, trainpath,
-                testpath):
+                testpath, maxlen, batch_size, seed):
         # trainpath = './data/train.csv'
         # testpath = './data/test.csv'
+        pl.utilities.seed.seed_everything(seed)
         self.train = pd.read_csv(trainpath)
         self.test = pd.read_csv(testpath)
         self.stopwords = self._get_stopwords() # a set
-        logging.basicConfig(level=logging.INFO)
+        self.batch_size = batch_size
+        self.maxlen = maxlen
+
+        logging.basicConfig(level=logging.DEBUG)
         self.log = logging.getLogger(__name__)
 
     def preproc(self):
@@ -41,8 +45,6 @@ class DataPreprocUtils:
         self.trainset = TensorDataset(trainX, trainy)
         self.testset = TensorDataset(testX, testy)
 
-
-
     def _df2tensor(self, split):
         X = split['preproc_text'].apply(lambda x:self._tokenize(x))
         y = split['label']
@@ -52,29 +54,29 @@ class DataPreprocUtils:
         return _X, _y
 
     def get_dataloader(self):
+        batch_size = self.batch_size
         self.trainloader = DataLoader(self.trainset, shuffle = True,
-                                num_workers = Config['NUM_WORKER'],
-                                batch_size=Config['BATCHSIZE'])
+                                num_workers = 12,
+                                batch_size=batch_size)
         self.testloader = DataLoader(self.testset, shuffle = False,
-                                num_workers = Config['NUM_WORKER'],
-                                batch_size=Config['BATCHSIZE'])
+                                num_workers = 12,
+                                batch_size= batch_size)
         self.log.info('Finished making 2 dataloaders.')
         return self.trainloader, self.testloader
 
     def _detok_random(self):
-        r = random.randint(0, trainX.shape[0])
+        trainset = self.trainset
+        r = random.randint(0, len(trainset))
         detokenizer = self.vocabs.get_itos()
         self.log.debug(f'random index: {r}')
-        # “World”: 0,“Sports”: 1,“Business”: 2,“Sci/Tech”: 3
-        x = self.trainX[r,:]
+        x, y = trainset[r]
         self.log.debug(f'tokenized example:\n {x}')
-        self.log.debug(f'label: {LabelMapping[self.trainy[r].item()]}')
+        self.log.debug(f'label: {LabelMapping[y.item()]}')
         self.log.debug(f'detokenized example:')
         self.log.debug([detokenizer[tok] for tok in x])
 
-
     def _tokenize(self, x):
-        maxlen = Config['MAXLEN']           # nltk.word_tokenize, spacy (better tokenize)
+        maxlen = self.maxlen    # nltk.word_tokenize, spacy (better tokenize)
         x = x[:maxlen]                      # truncation
         tokenized_x = np.zeros(maxlen)      # padding: np.ones since [PAD]: 0
         tokenized_x[:len(x)] = np.array([self.vocabs[v] for v in x])
@@ -105,15 +107,5 @@ class DataPreprocUtils:
             for rid, data in dataset.iterrows():
                 text = data['preproc_text']
                 yield text
-
-
-
-# p = DataPreprocUtils(
-#     trainpath = './data/train.csv',
-#     testpath = './data/test.csv'
-# )
-# p.preproc()
-# trainl, testl = p.get_dataloader()
-
 
 
