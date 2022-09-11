@@ -23,6 +23,7 @@ class LSTMNet(pl.LightningModule):
 
         super().__init__()
         pl.utilities.seed.seed_everything(seed)
+
         # variables
         self.num_directions = 2 if is_bidirectional else 1
         self.lstm_hdim = lstm_hdim
@@ -53,7 +54,7 @@ class LSTMNet(pl.LightningModule):
         self.Dropout = nn.Dropout(dropout)
         self.Out  = nn.Linear(hiddim, numchoice)
         self.accuracy = torchmetrics.Accuracy()
-
+        self.save_hyperparameters()
     def forward(self, x):
         x = self.Embedding(x)
         x, (h, c) = self.LSTM(x)

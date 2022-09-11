@@ -21,6 +21,7 @@ import logging
 from gensim.models import fasttext
 import numpy as np
 import pathlib
+import joblib
 
 def get_embeddings():
     script_loc = pathlib.Path(__file__).parent.resolve()
@@ -59,6 +60,7 @@ def main(args):
     # p._detok_random() # for debug purpose
     logging.info('Finished data prep.')
 
+
     pretrained_embeddings = None
     if args.use_pretrained:
         embpath = get_embeddings()
@@ -88,7 +90,7 @@ def main(args):
 
     checkpoint_callback = ModelCheckpoint(
         monitor="val_acc",
-        dirpath="./checkpoints",
+        dirpath = args.model_dir,
         filename="AG-{epoch:02d}-{val_acc:.2f}",
         save_top_k=3,
         mode="max")
@@ -101,6 +103,7 @@ def main(args):
                      callbacks=[checkpoint_callback])
     trainer.fit(model, trainloader, testloader)
     logging.info('Finished training!')
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -120,6 +123,8 @@ if __name__ == "__main__":
     parser.add_argument("--is_bidirectional", type=bool, default = False)
     parser.add_argument("--lstm_hdim", type=int, default = 256)
     parser.add_argument("--hiddim", type=int, default = 32)
+
+    parser.add_argument("--model_dir", type=str, default = './checkpoints')
 
     args = parser.parse_args()
     main(args)
